@@ -18,78 +18,64 @@ import rx.Single;
 import static me.escoffier.demo.Shopping.getFallbackPrice;
 import static me.escoffier.demo.Shopping.retrievePrice;
 
-/**
- * @author clement
- */
 public class MyShoppingList extends AbstractVerticle {
 
     WebClient shopping, pricer;
-    private CircuitBreaker circuit;
 
     @Override
     public void start() {
-
-        circuit = CircuitBreaker.create("circuit-breaker", vertx,
-            new CircuitBreakerOptions()
-                .setFallbackOnFailure(true)
-                .setMaxFailures(2)
-                .setResetTimeout(5000)
-                .setTimeout(1000)
-        );
-
         Router router = Router.router(vertx);
         router.route("/health").handler(rc -> rc.response().end("OK"));
         router.route("/").handler(this::getShoppingList);
 
         ServiceDiscovery.create(vertx, discovery -> {
-
             // Get pricer-service
-            Single<WebClient> pSingle = HttpEndpoint.rxGetWebClient(discovery, rec -> rec.getName().equals("pricer-service"));
-
-            Single<WebClient> sSingle = HttpEndpoint.rxGetWebClient(discovery, rec -> rec.getName().equals("shopping-backend"));
-
-            Single.zip(pSingle, sSingle, (p, s) -> {
-                pricer = p;
-                shopping = s;
-
-                return vertx.createHttpServer()
-                    .requestHandler(router::accept)
-                    .listen(8080);
-            }).subscribe();
 
             // Get shopping-backend
-            
+
+            // When both are done...
 
         });
+
+        vertx.createHttpServer()
+            .requestHandler(router::accept)
+            .listen(8080);
     }
 
     private void getShoppingList(RoutingContext rc) {
         HttpServerResponse serverResponse =
             rc.response().setChunked(true);
 
-        Single<JsonObject> single = shopping.get("/shopping")
-            .as(BodyCodec.jsonObject())
-            .rxSend()
-            .map(HttpResponse::body);
+       /*
+         +--> Retrieve shopping list
+           +
+           +-->  for each item, call the pricer, concurrently
+                    +
+                    |
+                    +-->  For each completed evaluation (line),
+                          write it to the HTTP response
+         */
 
-        single.subscribe(
-            list -> {
-                Observable.from(list)
-                    .flatMap(entry ->
-                        circuit.rxExecuteCommandWithFallback(
-                            future -> retrievePrice(pricer, entry, future),
-                            t -> getFallbackPrice(entry)
-                        )
-                            .toObservable()
-                    )
-                    .subscribe(
-                        res -> Shopping.writeProductLine(serverResponse, res),
-                        rc::fail,
-                        serverResponse::end
-                    );
-            }
-        );
-
+       
+         /*
+                               shopping          pricer
+                               backend
+                 +                +                +
+                 |                |                |
+                 +--------------> |                |
+                 |                |                |
+                 |                |                |
+                 +-------------------------------> |
+                 |                |                |
+                 +-------------------------------> |
+        write <--|                |                |
+                 +-------------------------------> |
+        write <--|                +                +
+                 |
+        write <--|
+                 |
+          end <--|
+         */
     }
 
 }
