@@ -14,6 +14,5 @@
     <module>pricer-service</module>
     <module>shopping-list-service</module>
     <module>shopping-backend</module>
-    <module>shopping-backend</module>
   </modules>
 </project>
